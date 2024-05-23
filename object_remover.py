@@ -7,7 +7,7 @@ from model import YOLOv8Seg
 
 class ObjectRemover():
     def __init__(self):
-        self.model = None
+        self.model_yolov8 = None
         self.capture = None
 
         self._win_width = None
@@ -19,9 +19,9 @@ class ObjectRemover():
 
     def load(self, filename: str):
         # Load the YOLOv8 segmentation model if not loaded already
-        if self.model is None:
-            self.model = YOLOv8Seg()
-            self.model.load_model(gpu=False)
+        if self.model_yolov8 is None:
+            self.model_yolov8 = YOLOv8Seg()
+            self.model_yolov8.load_model(gpu=False)
 
         # Initialize media capture with the given filename
         self.capture = MediaCapture(filename, onstream=False)
@@ -29,7 +29,7 @@ class ObjectRemover():
         self._win_height = int(self.capture.height // 2)
 
     def select(self):
-        if self.model is None:
+        if self.model_yolov8 is None:
             raise AttributeError('Model is not initialized. Call load() method first.')
 
         first_frame = None
@@ -42,17 +42,17 @@ class ObjectRemover():
                 raise AttributeError('Can not retrieve any frame from the stream.')
 
             # Perform instance segmentation on the first frame
-            self.model.predict(first_frame)
-            first_frame = self.model.draw_detections(
-                self.model.predict_image,
-                self.model.result_boxes,
-                self.model.result_classes,
-                self.model.result_confs,
-                self.model.result_masks
+            self.model_yolov8.predict(first_frame)
+            first_frame = self.model_yolov8.draw_detections(
+                self.model_yolov8.predict_image,
+                self.model_yolov8.result_boxes,
+                self.model_yolov8.result_classes,
+                self.model_yolov8.result_confs,
+                self.model_yolov8.result_masks
             )
 
             # Check whether there is any object existed
-            if len(self.model.result_classes) > 0:
+            if len(self.model_yolov8.result_classes) > 0:
                 break
             first_frame = None
 
@@ -68,7 +68,7 @@ class ObjectRemover():
             if not self._is_selected:
                 result_image = self.draw_trajectory(first_frame)
             else:
-                result_image = self.draw_selection(first_frame, self.model.result_boxes)
+                result_image = self.draw_selection(first_frame, self.model_yolov8.result_boxes)
 
             cv2.imshow(win_name, result_image)
 
@@ -116,7 +116,7 @@ class ObjectRemover():
         box = np.array([x, y, x + w, y + h])
 
         # Compute IoU between the bounding box and detected object
-        ious = self.model.compute_IoU(box, boxes)
+        ious = self.model_yolov8.compute_IoU(box, boxes)
 
         if np.all(ious == 0):  # No overlapping
             return result_image
@@ -135,7 +135,7 @@ class ObjectRemover():
 
     def match(self, src_image, dst_image):
         # Predict instances in the destination image
-        self.model.predict(dst_image)
+        self.model_yolov8.predict(dst_image)
 
         # Initialize ORB detector and BFMatcher
         orb = cv2.ORB_create()
@@ -151,9 +151,9 @@ class ObjectRemover():
         matched_image = None
 
         # Iterate through each instance detected in the destination image
-        for index in range(len(self.model.result_classes)):
+        for index in range(len(self.model_yolov8.result_classes)):
             # Extract the instance image from the destination image
-            compared_image = self.model.extract_instance(index)
+            compared_image = self.model_yolov8.extract_instance(index)
 
             # Detect keypoints and compute descriptors for the instance image
             keypointsB, descriptorsB = orb.detectAndCompute(compared_image, None)
@@ -184,7 +184,7 @@ class ObjectRemover():
         # Extract the selected image
         if self._selected_index is None:
             raise AttributeError('Object is not selected. Call select() method first.')
-        selected_image = self.model.extract_instance(self._selected_index)
+        selected_image = self.model_yolov8.extract_instance(self._selected_index)
 
         # Track the selected image on each frame
         while self.capture.is_opened():
@@ -201,12 +201,12 @@ class ObjectRemover():
             if matched_index is None:
                 output_image = frame
             else:
-                output_image = self.model.draw_detections(
-                    self.model.predict_image,
-                    [self.model.result_boxes[matched_index]],
-                    [self.model.result_classes[matched_index]],
-                    [self.model.result_confs[matched_index]],
-                    [self.model.result_masks[matched_index]]
+                output_image = self.model_yolov8.draw_detections(
+                    self.model_yolov8.predict_image,
+                    [self.model_yolov8.result_boxes[matched_index]],
+                    [self.model_yolov8.result_classes[matched_index]],
+                    [self.model_yolov8.result_confs[matched_index]],
+                    [self.model_yolov8.result_masks[matched_index]]
                 )
                 selected_image = matched_image.copy()
 
