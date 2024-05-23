@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 from capture import MediaCapture
-from model import YOLOv8Seg
+from models import YOLOv8Seg
 
 
 class ObjectRemover():

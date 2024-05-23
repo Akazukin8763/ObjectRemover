@@ -1,7 +1,7 @@
 import cv2
 import pafy
 
-from model import YOLOv8Seg
+from models import YOLOv8Seg
 from capture import MediaCapture
 
 
