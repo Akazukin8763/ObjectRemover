@@ -341,3 +341,23 @@ class YOLOv8Seg:
                         text_size, (255, 255, 255), text_thickness, cv2.LINE_AA)
 
         return output_image
+
+    def extract_instance(self, index):
+        if not (0 <= index <= len(self.result_classes)):
+            raise IndexError('The index is out of range, please check the target index.')
+
+        # Get the selected bounding box and mask
+        selected_box = self._result_boxes[index].astype(np.int32)
+        selected_mask = self._result_masks[index]
+
+        # Extract the coordinates of the bounding box
+        x1, y1, x2, y2 = selected_box
+        x, y, w, h = x1, y1, x2 - x1, y2 - y1
+
+        # Apply the mask to the cropped image
+        cropped_image = self.predict_image[y:y + h, x:x + w].copy()
+        cropped_mask = selected_mask[y:y + h, x:x + w].copy().astype(np.bool_)
+
+        cropped_image[~cropped_mask] = (0, 0, 0)
+
+        return cropped_image

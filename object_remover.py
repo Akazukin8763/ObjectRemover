@@ -10,6 +10,9 @@ class ObjectRemover():
         self.model = None
         self.capture = None
 
+        self._win_width = None
+        self._win_height = None
+
         self._trajectory = []
         self._is_selected = False
         self._selected_index = None
@@ -22,6 +25,8 @@ class ObjectRemover():
 
         # Initialize media capture with the given filename
         self.capture = MediaCapture(filename, onstream=False)
+        self._win_width = int(self.capture.width // 2)
+        self._win_height = int(self.capture.height // 2)
 
     def select(self):
         if self.model is None:
@@ -37,7 +42,7 @@ class ObjectRemover():
                 raise AttributeError('Can not retrieve any frame from the stream.')
 
             # Perform instance segmentation on the first frame
-            first_frame = self.model.predict(first_frame)
+            self.model.predict(first_frame)
             first_frame = self.model.draw_detections(
                 self.model.predict_image,
                 self.model.result_boxes,
@@ -53,7 +58,8 @@ class ObjectRemover():
 
         # Create a window for user selection
         win_name = f'{__class__.__name__} - Selecting'
-        cv2.namedWindow(win_name, cv2.WINDOW_NORMAL | cv2.WINDOW_FREERATIO)
+        cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(win_name, self._win_width, self._win_height)
         cv2.imshow(win_name, first_frame)
         cv2.setMouseCallback(win_name, self.__mouse_callback)
 
@@ -75,7 +81,8 @@ class ObjectRemover():
                 if self._selected_index is not None:
                     break
 
-                cv2.namedWindow(win_name, cv2.WINDOW_NORMAL | cv2.WINDOW_FREERATIO)
+                cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(win_name, self._win_width, self._win_height)
                 cv2.setMouseCallback(win_name, self.__mouse_callback)
 
         cv2.destroyAllWindows()
@@ -126,38 +133,102 @@ class ObjectRemover():
 
         return result_image
 
-    def extract_selection(self):
+    def match(self, src_image, dst_image):
+        # Predict instances in the destination image
+        self.model.predict(dst_image)
+
+        # Initialize ORB detector and BFMatcher
+        orb = cv2.ORB_create()
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+
+        # Detect keypoints and compute descriptors for the source image
+        keypointsA, descriptorsA = orb.detectAndCompute(src_image, None)
+
+        best_similarity = 0.35
+        max_possible_matches = len(descriptorsA)
+        
+        matched_index = None
+        matched_image = None
+
+        # Iterate through each instance detected in the destination image
+        for index in range(len(self.model.result_classes)):
+            # Extract the instance image from the destination image
+            compared_image = self.model.extract_instance(index)
+
+            # Detect keypoints and compute descriptors for the instance image
+            keypointsB, descriptorsB = orb.detectAndCompute(compared_image, None)
+
+            if descriptorsB is None:
+                continue
+
+            # Match descriptors between the source and instance images
+            matches = bf.match(descriptorsA, descriptorsB)
+            matches = sorted(matches, key=lambda x: x.distance)
+            num_matches = len(matches)
+
+            # Update the best similarity and matched index/image if the current similarity is higher
+            similarity = num_matches / max_possible_matches
+
+            if similarity > best_similarity:
+                best_similarity = similarity
+
+                matched_index = index
+                matched_image = compared_image
+
+        return matched_index, matched_image
+
+    def run(self):
+        # Select the target object to remove
+        self.select()
+
+        # Extract the selected image
         if self._selected_index is None:
             raise AttributeError('Object is not selected. Call select() method first.')
+        selected_image = self.model.extract_instance(self._selected_index)
 
-        # Get the selected bounding box and mask
-        selected_box = self.model.result_boxes[self._selected_index].astype(np.int32)
-        selected_mask = self.model.result_masks[self._selected_index]
+        # Track the selected image on each frame
+        while self.capture.is_opened():
+            # Retrieve current frame image
+            frame = self.capture.read()
 
-        # Extract the coordinates of the bounding box
-        x1, y1, x2, y2 = selected_box
-        x, y, w, h = x1, y1, x2 - x1, y2 - y1
+            if frame is None:
+                break
 
-        # Apply the mask to the cropped image
-        cropped_image = self.model.predict_image[y:y + h, x:x + w].copy()
-        cropped_mask = selected_mask[y:y + h, x:x + w].copy().astype(np.bool_)
+            # Match the selected image with the current frame
+            matched_index, matched_image = self.match(selected_image, frame)
 
-        cropped_image[~cropped_mask] = (0, 0, 0)
+            # Generate output image based on the match result
+            if matched_index is None:
+                output_image = frame
+            else:
+                output_image = self.model.draw_detections(
+                    self.model.predict_image,
+                    [self.model.result_boxes[matched_index]],
+                    [self.model.result_classes[matched_index]],
+                    [self.model.result_confs[matched_index]],
+                    [self.model.result_masks[matched_index]]
+                )
+                selected_image = matched_image.copy()
 
-        return cropped_image
+            # Display the output image
+            win_name = f'{__class__.__name__} - Tracking'
+            cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(win_name, self._win_width, self._win_height)
+            cv2.imshow(win_name, output_image)
+
+            if cv2.waitKey(1) & 0xFF == 27:
+                break
+
+        cv2.destroyAllWindows()
 
 
 def main():
+    # filepath = './resources/IMG_1722.jpg'
+    filepath = './resources/4K African Animals - Serengeti National Park.mp4'
+
     remover = ObjectRemover()
-    remover.load('./resources/IMG_1722.jpg')
-
-    remover.select()
-
-    output_image = remover.extract_selection()
-
-    cv2.imshow('Selection', output_image)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    remover.load(filepath)
+    remover.run()
 
 
 if __name__ == '__main__':
