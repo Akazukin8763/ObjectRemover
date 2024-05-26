@@ -1,3 +1,6 @@
+import math
+import os
+
 import cv2
 import numpy as np
 
@@ -8,7 +11,10 @@ from models import YOLOv8Seg
 class ObjectRemover():
     def __init__(self):
         self.model_yolov8 = None
+        self.model_propainter = None
         self.capture = None
+
+        self._filename = None
 
         self._win_width = None
         self._win_height = None
@@ -25,6 +31,7 @@ class ObjectRemover():
 
         # Initialize media capture with the given filename
         self.capture = MediaCapture(filename, onstream=False)
+        self._filename = os.path.splitext(os.path.split(filename)[1])[0]
         self._win_width = int(self.capture.width // 2)
         self._win_height = int(self.capture.height // 2)
 
@@ -177,7 +184,7 @@ class ObjectRemover():
 
         return matched_index, matched_image
 
-    def run(self):
+    def run(self, learning_base = False):
         # Select the target object to remove
         self.select()
 
@@ -186,40 +193,108 @@ class ObjectRemover():
             raise AttributeError('Object is not selected. Call select() method first.')
         selected_image = self.model_yolov8.extract_instance(self._selected_index)
 
-        # Track the selected image on each frame
+        # Inpaint the image
+        if learning_base:
+            self.__inpaint_with_learning_base(selected_image)
+        else:
+            self.__inpaint_without_learning_base(selected_image)
+
+    def __inpaint_without_learning_base(self, target_instance_image):
+        moving_mask = self.model_yolov8.result_masks[self._selected_index].copy()
+
+        record_boxes = []
+        record_masks = []
+
+        background_image = np.zeros((self.capture.height, self.capture.width, 3))
+        output = cv2.VideoWriter(f'./outputs/[Inpaint] {self._filename}.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 
+                                 self.capture.fps, (self.capture.width, self.capture.height))
+
+        start_frame = self.capture.frame - 1
+        self.capture.frame = start_frame - 1
+
+        # Track the target instance on each frame
         while self.capture.is_opened():
+            # Retrieve current frame image
+            frame = self.capture.read()
+
+            if frame is None:
+                self.capture.frame = start_frame
+                break
+
+            # Match the target instance with the current frame
+            matched_index, matched_image = self.match(target_instance_image, frame)
+
+            # Combining the instance moving mask
+            if matched_index is not None:
+                matched_mask = self.model_yolov8.result_masks[matched_index].copy()
+                matched_box = self.model_yolov8.result_boxes[matched_index].copy()
+
+                # Record the bounding box and mask
+                x1, y1 = list(map(math.floor, matched_box[:2]))
+                x2, y2 = list(map(math.floor, matched_box[2:]))
+
+                record_boxes.append([x1, y1, x2, y2])
+                record_masks.append(matched_mask[y1:y2, x1:x2])
+
+                # Combine the new mask with the moving mask
+                moving_mask = cv2.bitwise_or(moving_mask, matched_mask)
+
+                # Update the target instance for the next frame
+                target_instance_image = matched_image.copy()
+            else:
+                record_boxes.append(None)
+                record_masks.append(None)
+
+        # Process each recorded bounding box and mask
+        for box, mask in zip(record_boxes, record_masks):
+            # Retrieve current frame image
+            frame = self.capture.read()
+
+            if frame is None:
+                self.capture.frame = start_frame
+                break
+
+            # Update the static background image
+            if box is not None:
+                x1, y1, x2, y2 = box
+    
+                # Create a mask for the current frame
+                target_instance_mask = np.zeros((self.capture.height, self.capture.width))
+                target_instance_mask[y1:y2, x1:x2] = mask
+
+                # Copy the background pixels from the current frame where the mask excludes the target instance
+                remain_mask = cv2.bitwise_xor(moving_mask, target_instance_mask).astype(np.bool_)
+                background_image[remain_mask] = frame[remain_mask]
+
+        background_image = background_image.astype(np.uint8)
+
+        # Inpaint the target instance by covering the background image
+        for box, mask in zip(record_boxes, record_masks):
             # Retrieve current frame image
             frame = self.capture.read()
 
             if frame is None:
                 break
 
-            # Match the selected image with the current frame
-            matched_index, matched_image = self.match(selected_image, frame)
+            # Inpaint each frame
+            if box is not None:
+                x1, y1, x2, y2 = box
 
-            # Generate output image based on the match result
-            if matched_index is None:
-                output_image = frame
-            else:
-                output_image = self.model_yolov8.draw_detections(
-                    self.model_yolov8.predict_image,
-                    [self.model_yolov8.result_boxes[matched_index]],
-                    [self.model_yolov8.result_classes[matched_index]],
-                    [self.model_yolov8.result_confs[matched_index]],
-                    [self.model_yolov8.result_masks[matched_index]]
-                )
-                selected_image = matched_image.copy()
+                # Create a mask for the current frame
+                target_instance_mask = np.zeros((self.capture.height, self.capture.width))
+                target_instance_mask[y1:y2, x1:x2] = mask
+                target_instance_mask = target_instance_mask.astype(np.bool_)
 
-            # Display the output image
-            win_name = f'{__class__.__name__} - Tracking'
-            cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(win_name, self._win_width, self._win_height)
-            cv2.imshow(win_name, output_image)
+                # Replace the target instance in the current frame with the background
+                frame[target_instance_mask] = background_image[target_instance_mask]
 
-            if cv2.waitKey(1) & 0xFF == 27:
-                break
+            # Write the modified frame to the output video
+            output.write(frame)
 
-        cv2.destroyAllWindows()
+        output.release()
+
+    def __inpaint_with_learning_base(self, target_instance_image):
+        pass
 
 
 def main():

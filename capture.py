@@ -14,12 +14,14 @@ class MediaCapture:
             self.image = cv2.imread(filename)
             self._width = self.image.shape[1]
             self._height = self.image.shape[0]
+            self._fps = 0
         else:
             self.onstream = onstream
             self.capture = cv2.VideoCapture(filename)
 
-            self._width = self.capture.get(cv2.CAP_PROP_FRAME_WIDTH)
-            self._height = self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            self._width = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self._height = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            self._fps = int(self.capture.get(cv2.CAP_PROP_FPS))
 
             self.lock = threading.Lock()
             self.event = threading.Event()
@@ -36,6 +38,21 @@ class MediaCapture:
     @property
     def height(self):
         return self._height
+
+    @property
+    def fps(self):
+        return self._fps
+    
+    @property
+    def frame(self):
+        if not self._is_image:
+            return int(self.capture.get(cv2.CAP_PROP_POS_FRAMES))
+        return 0
+
+    @frame.setter
+    def frame(self, new_frame: int):
+        if not self._is_image:
+            self.capture.set(cv2.CAP_PROP_POS_FRAMES, new_frame)
 
     def _reader(self):
         while not self.event.is_set():
