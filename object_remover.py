@@ -185,22 +185,7 @@ class ObjectRemover():
 
         return matched_index, matched_image
 
-    def run(self, learning_base = False):
-        # Select the target object to remove
-        self.select()
-
-        # Extract the selected image
-        if self._selected_index is None:
-            raise AttributeError('Object is not selected. Call select() method first.')
-        selected_image = self.model_yolov8.extract_instance(self._selected_index)
-
-        # Inpaint the image
-        if learning_base:
-            self.__inpaint_with_learning_base(selected_image)
-        else:
-            self.__inpaint_without_learning_base(selected_image)
-
-    def __inpaint_without_learning_base(self, target_instance_image):
+    def track(self, start_frame, end_frame, target_instance_image):
         moving_mask = self.model_yolov8.result_masks[self._selected_index].copy()
 
         # Initialize lists to record frames, bounding boxes, and masks
@@ -208,11 +193,10 @@ class ObjectRemover():
         record_boxes = []
         record_masks = []
 
-        # Set the starting frame for processing
-        start_frame = self.capture.frame - 1
+        # Retrieve all frame
         self.capture.frame = start_frame - 1
+        current_frame = start_frame - 1
 
-        # Track the target instance on each frame
         while self.capture.is_opened():
             # Retrieve current frame image
             frame = self.capture.read()
@@ -223,6 +207,16 @@ class ObjectRemover():
 
             record_frames.append(frame)
 
+            # Break if reach the end frame
+            current_frame = current_frame + 1
+            if current_frame > end_frame:
+                self.capture.frame = start_frame
+                break
+
+        # Track the target instance on each frame
+        progress = tqdm(record_frames, desc=f"Tracking", total=len(record_frames))
+
+        for frame in progress:
             # Match the target instance with the current frame
             matched_index, matched_image = self.match(target_instance_image, frame)
 
@@ -247,11 +241,34 @@ class ObjectRemover():
                 record_boxes.append(None)
                 record_masks.append(None)
 
+        return moving_mask, record_frames, record_boxes, record_masks
+
+    def run(self, learning_base = False):
+        # Select the target object to remove
+        self.select()
+
+        # Extract the selected image
+        if self._selected_index is None:
+            raise AttributeError('Object is not selected. Call select() method first.')
+        selected_image = self.model_yolov8.extract_instance(self._selected_index)
+
+        # Inpaint the image
+        if learning_base:
+            self.__inpaint_with_learning_base(selected_image)
+        else:
+            self.__inpaint_without_learning_base(selected_image)
+
+    def __inpaint_without_learning_base(self, target_instance_image):
+        # Tracking the target instance
+        moving_mask, frames, boxes, masks = self.track(self.capture.frame - 1,
+                                                       self.capture.total_frames,
+                                                       target_instance_image)
+
         # Process each recorded bounding box and mask
         results = []
 
-        progress = tqdm(enumerate(zip(record_frames, record_boxes, record_masks)), 
-                        desc=f"Inpaint without learning base", total=len(record_frames))
+        progress = tqdm(enumerate(zip(frames, boxes, masks)), 
+                        desc=f"Inpaint without learning base", total=len(frames))
 
         for current_index, (frame, box, mask) in progress:
             # Directly ignore the image that didn't catch any instance
@@ -280,42 +297,42 @@ class ObjectRemover():
 
                 if not reached_start:
                     # Create a mask for the previous frame
-                    x1, y1, x2, y2 = record_boxes[prev_index]
+                    x1, y1, x2, y2 = boxes[prev_index]
                     target_instance_mask = np.zeros((self.capture.height, self.capture.width))
-                    target_instance_mask[y1:y2, x1:x2] = record_masks[prev_index]
+                    target_instance_mask[y1:y2, x1:x2] = masks[prev_index]
 
                     # Copy the background pixels from the previous frame where the mask excludes the target instance
                     exclude_mask = cv2.bitwise_xor(filled_mask, target_instance_mask)
                     remain_mask = cv2.bitwise_and(filled_mask, exclude_mask).astype(np.bool_)
                     filled_mask = cv2.bitwise_and(filled_mask, target_instance_mask)
-                    background_image[remain_mask] = record_frames[prev_index][remain_mask]
+                    background_image[remain_mask] = frames[prev_index][remain_mask]
 
                 # Inpainting based on next frame
                 if not np.any(filled_mask):
                     break
 
                 next_index = current_index + offset
-                if next_index >= len(record_frames):
+                if next_index >= len(frames):
                     reached_end = True
 
                 if not reached_end:
                     # Create a mask for the next frame
-                    x1, y1, x2, y2 = record_boxes[next_index]
+                    x1, y1, x2, y2 = boxes[next_index]
                     target_instance_mask = np.zeros((self.capture.height, self.capture.width))
-                    target_instance_mask[y1:y2, x1:x2] = record_masks[next_index]
+                    target_instance_mask[y1:y2, x1:x2] = masks[next_index]
                     
                     # Copy the background pixels from the next frame where the mask excludes the target instance
                     exclude_mask = cv2.bitwise_xor(filled_mask, target_instance_mask)
                     remain_mask = cv2.bitwise_and(filled_mask, exclude_mask).astype(np.bool_)
                     filled_mask = cv2.bitwise_and(filled_mask, target_instance_mask)
-                    background_image[remain_mask] = record_frames[next_index][remain_mask]
+                    background_image[remain_mask] = frames[next_index][remain_mask]
 
             background_image = background_image.astype(np.uint8)
 
             # Create a mask for the current frame
-            x1, y1, x2, y2 = record_boxes[current_index]
+            x1, y1, x2, y2 = boxes[current_index]
             target_instance_mask = np.zeros((self.capture.height, self.capture.width))
-            target_instance_mask[y1:y2, x1:x2] = record_masks[current_index]
+            target_instance_mask[y1:y2, x1:x2] = masks[current_index]
             target_instance_mask = target_instance_mask.astype(np.bool_)
 
             # Replace the target instance in the current frame with the background

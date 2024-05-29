@@ -6,7 +6,7 @@ import numpy as np
 import onnxruntime as ort
 from ultralytics import YOLO
 
-from utils import process_time, random_colors, sigmoid
+from utils import random_colors, sigmoid
 
 
 class_names = ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light',
@@ -91,7 +91,6 @@ class YOLOv8Seg:
             model = YOLO(f'{model_name}.pt')
             model.export(format="onnx")
 
-    @process_time
     def predict(self, image: np.ndarray):
         # Adjust the input image to match the required input dimensions of the model
         self.predict_image = image
