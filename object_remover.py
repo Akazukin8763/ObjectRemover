@@ -254,9 +254,27 @@ class ObjectRemover():
 
         # Inpaint the image
         if learning_base:
-            self.__inpaint_with_learning_base(selected_image)
+            results = self.__inpaint_with_learning_base(selected_image)
         else:
-            self.__inpaint_without_learning_base(selected_image)
+            results = self.__inpaint_without_learning_base(selected_image)
+
+        # Display the output image and save it
+        output = cv2.VideoWriter(f'./outputs/[Inpaint] {self._filename}.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 
+                                 self.capture.fps, (self.capture.width, self.capture.height))
+
+        for frame in results:
+            output.write(frame)
+
+            win_name = f'{__class__.__name__} - Inpaint'
+            cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(win_name, self._win_width, self._win_height)
+            cv2.imshow(win_name, frame)
+
+            if cv2.waitKey(1) & 0xFF == 27:
+                break
+
+        cv2.destroyAllWindows()
+        output.release()
 
     def __inpaint_without_learning_base(self, target_instance_image):
         # Tracking the target instance
@@ -339,23 +357,7 @@ class ObjectRemover():
             frame[target_instance_mask] = background_image[target_instance_mask]
             results.append(frame.astype(np.uint8))
 
-        # Display the output image and save it
-        output = cv2.VideoWriter(f'./outputs/[Inpaint] {self._filename}.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 
-                                 self.capture.fps, (self.capture.width, self.capture.height))
-
-        for frame in results:
-            output.write(frame)
-
-            win_name = f'{__class__.__name__} - Inpaint'
-            cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(win_name, self._win_width, self._win_height)
-            cv2.imshow(win_name, frame)
-
-            if cv2.waitKey(1) & 0xFF == 27:
-                break
-
-        cv2.destroyAllWindows()
-        output.release()
+        return results
 
     def __inpaint_with_learning_base(self, target_instance_image):
         pass
