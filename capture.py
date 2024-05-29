@@ -1,5 +1,6 @@
-import cv2
 import threading
+
+import cv2
 
 
 image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff']
@@ -15,13 +16,15 @@ class MediaCapture:
             self._width = self.image.shape[1]
             self._height = self.image.shape[0]
             self._fps = 0
+            self._total_frames = 1
         else:
             self.onstream = onstream
             self.capture = cv2.VideoCapture(filename)
 
             self._width = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH))
             self._height = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            self._fps = int(self.capture.get(cv2.CAP_PROP_FPS))
+            self._fps = self.capture.get(cv2.CAP_PROP_FPS)
+            self._total_frames = int(self.capture.get(cv2.CAP_PROP_FRAME_COUNT))
 
             self.lock = threading.Lock()
             self.event = threading.Event()
@@ -53,6 +56,10 @@ class MediaCapture:
     def frame(self, new_frame: int):
         if not self._is_image:
             self.capture.set(cv2.CAP_PROP_POS_FRAMES, new_frame)
+
+    @property
+    def total_frames(self):
+        return self._total_frames
 
     def _reader(self):
         while not self.event.is_set():
