@@ -1,5 +1,6 @@
 import math
 import os
+import shutil
 
 import cv2
 import numpy as np
@@ -7,7 +8,6 @@ import onnxruntime as ort
 from ultralytics import YOLO
 
 from utils import random_colors, sigmoid
-
 
 class_names = ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light',
                'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow',
@@ -72,9 +72,9 @@ class YOLOv8Seg:
                 available_providers = ort.get_available_providers()
                 providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
                 selected_providers = [p for p in providers if p in available_providers]
-                self.model = ort.InferenceSession(f'{self.model_name}.onnx', providers=selected_providers)
+                self.model = ort.InferenceSession(f'./weights/{self.model_name}.onnx', providers=selected_providers)
             else:
-                self.model = ort.InferenceSession(f'{self.model_name}.onnx')
+                self.model = ort.InferenceSession(f'./weights/{self.model_name}.onnx')
 
             inputs = self.model.get_inputs()
             self.input_names = [inputs[i].name for i in range(len(inputs))]
@@ -82,7 +82,7 @@ class YOLOv8Seg:
             self.input_height = inputs[0].shape[2]
 
     def __create_model(self, model_name):
-        filepath = f'./{model_name}.onnx'
+        filepath = f'./weights/{model_name}.onnx'
 
         if os.path.isfile(filepath):
             print(f'{filepath} has already existed.')
@@ -90,6 +90,9 @@ class YOLOv8Seg:
             print(f'Export model {filepath}')
             model = YOLO(f'{model_name}.pt')
             model.export(format="onnx")
+
+            shutil.move(f'./{model_name}.pt', f'./weights/{model_name}.pt')
+            shutil.move(f'./{model_name}.onnx', f'./weights/{model_name}.onnx')
 
     def predict(self, image: np.ndarray):
         # Adjust the input image to match the required input dimensions of the model
