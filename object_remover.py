@@ -6,7 +6,7 @@ import numpy as np
 from tqdm import tqdm
 
 from capture import MediaCapture
-from models import YOLOv8Seg
+from models import Inpainter, YOLOv8Seg
 
 
 class ObjectRemover():
@@ -28,16 +28,21 @@ class ObjectRemover():
         # Load the YOLOv8 segmentation model if not loaded already
         if self.model_yolov8 is None:
             self.model_yolov8 = YOLOv8Seg()
-            self.model_yolov8.load_model(gpu=False)
+            self.model_yolov8.load_model(gpu=True)
+
+        # Load the Propainter model if not loaded already
+        if self.model_propainter is None:
+            self.model_propainter = Inpainter()
+            self.model_propainter.load_model(gpu=True)
 
         # Initialize media capture with the given filename
         self.capture = MediaCapture(filename, onstream=False)
         self._filename = os.path.splitext(os.path.split(filename)[1])[0]
-        self._win_width = int(self.capture.width // 2)
-        self._win_height = int(self.capture.height // 2)
+        self._win_width = int(self.capture.width)
+        self._win_height = int(self.capture.height)
 
     def select(self):
-        if self.model_yolov8 is None:
+        if self.model_yolov8 is None or self.model_propainter is None:
             raise AttributeError('Model is not initialized. Call load() method first.')
 
         first_frame = None
@@ -146,7 +151,7 @@ class ObjectRemover():
         self.model_yolov8.predict(dst_image)
 
         # Initialize ORB detector and BFMatcher
-        orb = cv2.ORB_create()
+        orb = cv2.ORB_create(fastThreshold=0, edgeThreshold=0)
         bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
 
         # Detect keypoints and compute descriptors for the source image
@@ -360,7 +365,25 @@ class ObjectRemover():
         return results
 
     def __inpaint_with_learning_base(self, target_instance_image):
-        pass
+        # Tracking the target instance
+        _, frames, boxes, masks = self.track(self.capture.frame - 1,
+                                             self.capture.total_frames,
+                                             target_instance_image)
+
+        # Create the original masks
+        for i in range(len(boxes)):
+            target_instance_mask = np.zeros((self.capture.height, self.capture.width))
+
+            if boxes[i] is not None:
+                x1, y1, x2, y2 = boxes[i]
+                target_instance_mask[y1:y2, x1:x2] = masks[i]
+
+            masks[i] = target_instance_mask
+
+        # Use ProPainter to inpaint the target instance
+        results = self.model_propainter.predict(frames, masks)
+
+        return results
 
 
 def main():
