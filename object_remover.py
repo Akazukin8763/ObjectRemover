@@ -318,7 +318,7 @@ class ObjectRemover():
                 if not np.any(filled_mask):
                     break
 
-                if not reached_start:
+                if not reached_start and boxes[prev_index] is not None:
                     # Create a mask for the previous frame
                     x1, y1, x2, y2 = boxes[prev_index]
                     target_instance_mask = np.zeros((self.capture.height, self.capture.width))
@@ -338,7 +338,7 @@ class ObjectRemover():
                 if next_index >= len(frames):
                     reached_end = True
 
-                if not reached_end:
+                if not reached_end and boxes[next_index] is not None:
                     # Create a mask for the next frame
                     x1, y1, x2, y2 = boxes[next_index]
                     target_instance_mask = np.zeros((self.capture.height, self.capture.width))
