@@ -364,7 +364,7 @@ class ObjectRemover():
 
         return results
 
-    def __inpaint_with_learning_base(self, target_instance_image):
+    def __inpaint_with_learning_base(self, target_instance_image, window_size=80):
         # Tracking the target instance
         _, frames, boxes, masks = self.track(self.capture.frame - 1,
                                              self.capture.total_frames,
@@ -381,7 +381,14 @@ class ObjectRemover():
             masks[i] = target_instance_mask
 
         # Use ProPainter to inpaint the target instance
-        results = self.model_propainter.predict(frames, masks)
+        fragments = math.ceil(len(frames) / window_size)
+
+        frames_split = np.array_split(frames, fragments)
+        masks_split = np.array_split(masks, fragments)
+
+        results = []
+        for frame_chunk, mask_chunk in zip(frames_split, masks_split):
+            results.extend(self.model_propainter.predict(frame_chunk, mask_chunk))
 
         return results
 
