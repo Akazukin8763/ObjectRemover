@@ -146,7 +146,7 @@ class ObjectRemover():
 
         return result_image
 
-    def match(self, src_image, dst_image):
+    def match(self, src_image, dst_image, src_box, max_distance=50):
         # Predict instances in the destination image
         self.model_yolov8.predict(dst_image)
 
@@ -163,10 +163,15 @@ class ObjectRemover():
         matched_index = None
         matched_image = None
 
+        # Calculate the center point of the source box image
+        src_center_x = (src_box[0] + src_box[2]) / 2
+        src_center_y = (src_box[1] + src_box[3]) / 2
+
         # Iterate through each instance detected in the destination image
         for index in range(len(self.model_yolov8.result_classes)):
             # Extract the instance image from the destination image
             compared_image = self.model_yolov8.extract_instance(index)
+            matched_box = self.model_yolov8.result_boxes[index]
 
             # Detect keypoints and compute descriptors for the instance image
             keypointsB, descriptorsB = orb.detectAndCompute(compared_image, None)
@@ -182,7 +187,12 @@ class ObjectRemover():
             # Update the best similarity and matched index/image if the current similarity is higher
             similarity = num_matches / max_possible_matches
 
-            if similarity > best_similarity:
+            # add for matching
+            matched_center_x = (matched_box[0] + matched_box[2]) / 2
+            matched_center_y = (matched_box[1] + matched_box[3]) / 2
+            distance = math.sqrt((matched_center_x - src_center_x) ** 2 + (matched_center_y - src_center_y) ** 2)
+
+            if similarity > best_similarity and distance <= max_distance :
                 best_similarity = similarity
 
                 matched_index = index
@@ -221,9 +231,12 @@ class ObjectRemover():
         # Track the target instance on each frame
         progress = tqdm(record_frames, desc=f"Tracking", total=len(record_frames))
 
+        # add the box for matching frames
+        src_box = self.model_yolov8.result_boxes[self._selected_index].copy()
+        
         for frame in progress:
             # Match the target instance with the current frame
-            matched_index, matched_image = self.match(target_instance_image, frame)
+            matched_index, matched_image = self.match(target_instance_image, frame, src_box)
 
             # Combining the instance moving mask
             if matched_index is not None:
@@ -242,6 +255,9 @@ class ObjectRemover():
 
                 # Update the target instance for the next frame
                 target_instance_image = matched_image.copy()
+
+                # Update the source box for the next frame
+                src_box = matched_box.copy()
             else:
                 record_boxes.append(None)
                 record_masks.append(None)
@@ -421,7 +437,7 @@ class ObjectRemover():
 
 def main():
     # filepath = './resources/IMG_1722.jpg'
-    filepath = './resources/4K African Animals - Serengeti National Park.mp4'
+    filepath = './resources/Resize_640x360_4K_African_Animals_-_Serengeti_National_Park.mp4'
 
     remover = ObjectRemover()
     remover.load(filepath)
