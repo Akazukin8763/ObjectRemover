@@ -289,6 +289,8 @@ class ObjectRemover():
         moving_mask, frames, boxes, masks = self.track(self.capture.frame - 1,
                                                        self.capture.total_frames,
                                                        target_instance_image)
+        # Initialize the 5x5 kernel for dilation
+        dilate_kernel = np.ones((11,11), np.uint8)  
 
         # Process each recorded bounding box and mask
         results = []
@@ -303,7 +305,8 @@ class ObjectRemover():
                 continue
 
             # Initialize a background image and a filled mask
-            background_image = np.zeros((self.capture.height, self.capture.width, 3))
+            # background_image = np.zeros((self.capture.height, self.capture.width, 3))
+            background_image = frame.copy()
             filled_mask = moving_mask.copy()
 
             # Inpaint the background by previous or next frame image
@@ -326,6 +329,9 @@ class ObjectRemover():
                     x1, y1, x2, y2 = boxes[prev_index]
                     target_instance_mask = np.zeros((self.capture.height, self.capture.width))
                     target_instance_mask[y1:y2, x1:x2] = masks[prev_index]
+                    
+                    # dilate the mask 
+                    target_instance_mask = cv2.dilate(target_instance_mask, dilate_kernel, iterations=1)
 
                     # Copy the background pixels from the previous frame where the mask excludes the target instance
                     exclude_mask = cv2.bitwise_xor(filled_mask, target_instance_mask)
@@ -347,6 +353,9 @@ class ObjectRemover():
                     target_instance_mask = np.zeros((self.capture.height, self.capture.width))
                     target_instance_mask[y1:y2, x1:x2] = masks[next_index]
                     
+                    # dilate the mask
+                    target_instance_mask = cv2.dilate(target_instance_mask, dilate_kernel, iterations=1)
+
                     # Copy the background pixels from the next frame where the mask excludes the target instance
                     exclude_mask = cv2.bitwise_xor(filled_mask, target_instance_mask)
                     remain_mask = cv2.bitwise_and(filled_mask, exclude_mask).astype(np.bool_)
@@ -359,6 +368,10 @@ class ObjectRemover():
             x1, y1, x2, y2 = boxes[current_index]
             target_instance_mask = np.zeros((self.capture.height, self.capture.width))
             target_instance_mask[y1:y2, x1:x2] = masks[current_index]
+
+            # dilate the mask
+            target_instance_mask = cv2.dilate(target_instance_mask, dilate_kernel, iterations=1)
+
             target_instance_mask = target_instance_mask.astype(np.bool_)
 
             # Replace the target instance in the current frame with the background
@@ -398,7 +411,8 @@ class ObjectRemover():
 
 def main():
     # filepath = './resources/IMG_1722.jpg'
-    filepath = './resources/4K African Animals - Serengeti National Park.mp4'
+    # filepath = './resources/4K African Animals - Serengeti National Park.mp4'
+    filepath = './resources/Resize_640x360_4K_African_Animals_-_Serengeti_National_Park.mp4'
 
     remover = ObjectRemover()
     remover.load(filepath)
