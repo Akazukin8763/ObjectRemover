@@ -263,6 +263,9 @@ class ObjectRemover():
         else:
             results = self.__inpaint_without_learning_base(selected_image)
 
+        # Create the outputs folder if it doesn't exist
+        os.makedirs('outputs', exist_ok=True)
+
         # Display the output image and save it
         output = cv2.VideoWriter(f'./outputs/[Inpaint] {self._filename}.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 
                                  self.capture.fps, (self.capture.width, self.capture.height))
