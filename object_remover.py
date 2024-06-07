@@ -246,6 +246,25 @@ class ObjectRemover():
                 record_boxes.append(None)
                 record_masks.append(None)
 
+            '''Start testing'''
+            if matched_index is not None:
+                box = self.model_yolov8.result_boxes[matched_index].copy()
+                class_ = self.model_yolov8.result_classes[matched_index].copy()
+                score = self.model_yolov8.result_confs[matched_index].copy()
+                mask = self.model_yolov8.result_masks[matched_index].copy()
+                frame = self.model_yolov8.draw_detections(frame, [box], [class_], [score], [mask])
+
+            win_name = f'{__class__.__name__} - Tracking'
+            cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(win_name, self._win_width, self._win_height)
+            cv2.imshow(win_name, frame)
+
+            if cv2.waitKey(1) & 0xFF == 27:
+                break
+
+        cv2.destroyAllWindows()
+        '''End of testing'''
+
         return moving_mask, record_frames, record_boxes, record_masks
 
     def run(self, learning_base = False):
@@ -257,6 +276,7 @@ class ObjectRemover():
             raise AttributeError('Object is not selected. Call select() method first.')
         selected_image = self.model_yolov8.extract_instance(self._selected_index)
 
+        '''
         # Inpaint the image
         if learning_base:
             results = self.__inpaint_with_learning_base(selected_image)
@@ -280,6 +300,12 @@ class ObjectRemover():
 
         cv2.destroyAllWindows()
         output.release()
+        '''
+
+        '''Test tracking'''
+        moving_mask, frames, boxes, masks = self.track(self.capture.frame - 1,
+                                                       self.capture.total_frames,
+                                                       selected_image)
 
     def __inpaint_without_learning_base(self, target_instance_image):
         # Tracking the target instance
