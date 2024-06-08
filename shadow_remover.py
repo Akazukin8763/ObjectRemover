@@ -337,6 +337,7 @@ def process_shadow(image: np.ndarray,
 
             # Only consider blobs with size above threshold
             if cv.countNonZero(temp_filter) >= shadow_size_threshold:
-                shadow_masks.append(temp_filter)
+                shadow_mask = temp_filter.astype(np.float64) / 255
+                shadow_masks.append(shadow_mask)
 
     return shadow_masks

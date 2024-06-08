@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 from capture import MediaCapture
 from models import Inpainter, YOLOv8Seg
+from shadow_remover import process_shadow
 
 
 class ObjectRemover():
@@ -190,6 +191,30 @@ class ObjectRemover():
 
         return matched_index, matched_image
 
+    def match_shadow(self, target_instance_mask, dst_image):
+        # Find all of the shadows
+        shadow_masks = process_shadow(dst_image, ab_threshold=0)
+
+        # Match the shadow with target instance
+        target_mask = cv2.dilate(target_instance_mask, np.ones((3, 3)), iterations=3)
+        matched_mask = None
+
+        best_overlap = 0.1  # Threshold
+
+        for shadow_mask in shadow_masks:
+            # Calculate the overlap ratio
+            overlap_area = np.logical_and(target_mask, shadow_mask)
+            shadow_area = np.sum(shadow_mask)
+            overlap_sum = np.sum(overlap_area)
+            overlap_ratio = overlap_sum / shadow_area if shadow_area != 0 else 0
+
+            # Update the best matched shadow mask if the overlap region is larger
+            if overlap_ratio >= best_overlap:
+                best_overlap = overlap_ratio
+                matched_mask = shadow_mask
+
+        return matched_mask
+
     def track(self, start_frame, end_frame, target_instance_image):
         moving_mask = self.model_yolov8.result_masks[self._selected_index].copy()
 
@@ -197,6 +222,7 @@ class ObjectRemover():
         record_frames = []
         record_boxes = []
         record_masks = []
+        record_shadow_masks = []
 
         # Retrieve all frame
         self.capture.frame = start_frame - 1
@@ -246,7 +272,17 @@ class ObjectRemover():
                 record_boxes.append(None)
                 record_masks.append(None)
 
-        return moving_mask, record_frames, record_boxes, record_masks
+            # Find the shadow of target instance if matched
+            if matched_index is not None:
+                matched_mask = self.model_yolov8.result_masks[matched_index].copy()
+                shadow_mask = self.match_shadow(matched_mask, frame)
+
+                # Record the shadow mask
+                record_shadow_masks.append(shadow_mask)
+            else:
+                record_shadow_masks.append(None)
+
+        return moving_mask, record_frames, record_boxes, record_masks, record_shadow_masks
 
     def run(self, learning_base = False):
         # Select the target object to remove
@@ -286,17 +322,17 @@ class ObjectRemover():
 
     def __inpaint_without_learning_base(self, target_instance_image):
         # Tracking the target instance
-        moving_mask, frames, boxes, masks = self.track(self.capture.frame - 1,
-                                                       self.capture.total_frames,
-                                                       target_instance_image)
+        moving_mask, frames, boxes, masks, shadow_masks = self.track(self.capture.frame - 1,
+                                                                     self.capture.total_frames,
+                                                                     target_instance_image)
 
         # Process each recorded bounding box and mask
         results = []
 
-        progress = tqdm(enumerate(zip(frames, boxes, masks)), 
+        progress = tqdm(enumerate(zip(frames, boxes, masks, shadow_masks)), 
                         desc=f"Inpaint without learning base", total=len(frames))
 
-        for current_index, (frame, box, mask) in progress:
+        for current_index, (frame, box, mask, shadow_mask) in progress:
             # Directly ignore the image that didn't catch any instance
             if box is None:
                 results.append(frame)
@@ -305,6 +341,9 @@ class ObjectRemover():
             # Initialize a background image and a filled mask
             background_image = np.zeros((self.capture.height, self.capture.width, 3))
             filled_mask = moving_mask.copy()
+
+            if shadow_mask is not None:
+                filled_mask = cv2.bitwise_or(filled_mask, shadow_mask)
 
             # Inpaint the background by previous or next frame image
             reached_start, reached_end = False, False
@@ -369,9 +408,9 @@ class ObjectRemover():
 
     def __inpaint_with_learning_base(self, target_instance_image, window_size=80):
         # Tracking the target instance
-        _, frames, boxes, masks = self.track(self.capture.frame - 1,
-                                             self.capture.total_frames,
-                                             target_instance_image)
+        _, frames, boxes, masks, shadow_masks = self.track(self.capture.frame - 1,
+                                                           self.capture.total_frames,
+                                                           target_instance_image)
 
         # Create the original masks
         for i in range(len(boxes)):
@@ -380,6 +419,10 @@ class ObjectRemover():
             if boxes[i] is not None:
                 x1, y1, x2, y2 = boxes[i]
                 target_instance_mask[y1:y2, x1:x2] = masks[i]
+
+                # Inpaint the instance with shadow
+                if shadow_masks[i] is not None:
+                    target_instance_mask = cv2.bitwise_or(target_instance_mask, shadow_masks[i])
 
             masks[i] = target_instance_mask
 
