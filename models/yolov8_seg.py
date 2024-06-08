@@ -344,6 +344,40 @@ class YOLOv8Seg:
 
         return output_image
 
+    def draw_detections_test(self, image, boxes, masks, mask_alpha=0.3, mask_colors=None):
+        # Set the font scale and text thickness based on image size
+        image_height, image_width = image.shape[:2]
+        output_image = image.copy()
+
+        # If no mask colors are provided, generate random colors
+        if mask_colors is None:
+            mask_colors = random_colors(len(boxes))
+
+        # Draw masks
+        for i, (box, color) in enumerate(zip(boxes, mask_colors)):
+            x1, y1, x2, y2 = box.astype(int)
+
+            # Extract the mask region within the bounding box
+            crop_mask = masks[i][y1:y2, x1:x2, np.newaxis]
+            crop_output_image = output_image[y1:y2, x1:x2]
+
+            # Blend the mask color with the image
+            crop_output_image = crop_output_image * (1 - crop_mask) + crop_mask * color
+            output_image[y1:y2, x1:x2] = crop_output_image
+
+        # Apply the mask with the specified alpha value
+        output_image = cv2.addWeighted(output_image, mask_alpha, image, 1 - mask_alpha, 0)
+
+        # Draw bounding boxes and labels
+        for box, color in zip(boxes, mask_colors):
+            color = color.tolist()
+            x1, y1, x2, y2 = box.astype(int)
+
+            # Draw the bounding box
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), color, 2)
+
+        return output_image
+
     def extract_instance(self, index):
         if not (0 <= index <= len(self.result_classes)):
             raise IndexError('The index is out of range, please check the target index.')
