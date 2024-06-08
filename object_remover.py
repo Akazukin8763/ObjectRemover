@@ -157,7 +157,7 @@ class ObjectRemover():
         # Detect keypoints and compute descriptors for the source image
         keypointsA, descriptorsA = orb.detectAndCompute(src_image, None)
 
-        best_similarity = 0.35
+        best_similarity = 0.30
         max_possible_matches = len(descriptorsA)
         
         matched_index = None
@@ -225,7 +225,7 @@ class ObjectRemover():
         # store the continuous masks, and use it to create a big masks
         mask_stack = []
         position_stack = np.empty((0, 5))
-        delete_threshold = 3
+        delete_threshold = 3  # 3 for zebra scene, 10 for bird scene
 
         for id, frame in progress:
             # Match the target instance with the current frame
@@ -482,7 +482,9 @@ def main():
     # filepath = './resources/IMG_1722.jpg'
     # filepath = './resources/4K African Animals - Serengeti National Park.mp4'
     filepath = './resources/Resize_640x360_4K_African_Animals_-_Serengeti_National_Park.mp4'
-
+    # filepath = './resources/Resize_640x360_Amazing_Wildlife_of_Botswana_-_8K_Nature_Documentary_Film_with_music.mp4'
+    # filepath = './resources/Resize_640x360_8_Hours_of_Beautiful_Birds_No_Music_4K_Nature_RelaxationTM_-_Washington_State.mp4'
+    # filepath = './resources/Resize_640x360_WILD_WORLD_DOLBY_VISIONTM___EXTREME_COLORS_8K_HDR.mp4'
     remover = ObjectRemover()
     remover.load(filepath)
     remover.run(False)
