@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from capture import MediaCapture
 from models import Inpainter, YOLOv8Seg
-from shadow_remover import process_shadow
+from shadow_remover import find_contour_edges, process_shadow
 
 
 class ObjectRemover():
@@ -193,24 +193,41 @@ class ObjectRemover():
 
     def match_shadow(self, target_instance_mask, dst_image):
         # Find all of the shadows
-        shadow_masks = process_shadow(dst_image, ab_threshold=0)
+        shadow_size_threshold = int(self.capture.height * self.capture.width * 0.001)
+        shadow_masks = process_shadow(dst_image, ab_threshold=0, shadow_size_threshold=shadow_size_threshold)
 
         # Match the shadow with target instance
         target_mask = cv2.dilate(target_instance_mask, np.ones((3, 3)), iterations=3)
         matched_mask = None
 
-        best_overlap = 0.1  # Threshold
+        target_edge_pixels = find_contour_edges(target_instance_mask)  # Get the target edges
+        min_distance = min(self.capture.height, self.capture.width) * 0.05  # Threshold
 
         for shadow_mask in shadow_masks:
-            # Calculate the overlap ratio
+            # Calculate the overlap region ratio and relative size ratio
             overlap_area = np.logical_and(target_mask, shadow_mask)
-            shadow_area = np.sum(shadow_mask)
-            overlap_sum = np.sum(overlap_area)
-            overlap_ratio = overlap_sum / shadow_area if shadow_area != 0 else 0
 
-            # Update the best matched shadow mask if the overlap region is larger
-            if overlap_ratio >= best_overlap:
-                best_overlap = overlap_ratio
+            shadow_sum = np.sum(shadow_mask)
+            overlap_sum = np.sum(overlap_area)
+            target_sum = np.sum(target_mask)
+
+            overlap_ratio = overlap_sum / shadow_sum if shadow_sum != 0 else 0
+            relative_ratio = shadow_sum / target_sum if target_sum != 0 else 0
+
+            # Ignore the candidated shadow which overlap half of the target instance, or the shadow is too large
+            if overlap_ratio >= 0.5 or relative_ratio >= 1.5:
+                continue
+
+            # Update the best matched shadow mask if it is close to target
+            shadow_edge_pixels = find_contour_edges(shadow_mask)  # Get the shadow edges
+
+            distances = np.sqrt(
+                ((target_edge_pixels[:, np.newaxis, :] - shadow_edge_pixels[np.newaxis, :, :]) ** 2).sum(axis=2)
+            )
+            distance = np.min(distances)
+
+            if distance < min_distance:
+                min_distance = distance
                 matched_mask = shadow_mask
 
         return matched_mask

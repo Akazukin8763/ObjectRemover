@@ -311,6 +311,14 @@ def process_image_file(img_name: str,
 Modified from https://github.com/YalimD/image_shadow_remover/tree/master
 '''
 
+def find_contour_edges(mask: np.ndarray):
+    """Find the mask edge pixels"""
+    mask = mask.astype(np.uint8)
+    contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    edge_pixels = np.vstack(contours).squeeze(1)
+    return edge_pixels
+
+
 def process_shadow(image: np.ndarray, 
                    ab_threshold: int = 256,
                    region_adjustment_kernel_size: int = 10,
