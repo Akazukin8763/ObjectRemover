@@ -202,7 +202,7 @@ class YOLOv8Seg:
             crop_mask = cv2.resize(scale_crop_mask, (x2 - x1, y2 - y1), interpolation=cv2.INTER_CUBIC)
 
             # crop_mask = cv2.blur(crop_mask, blur_size)
-            crop_mask = cv2.medianBlur(crop_mask, ksize=7)
+            crop_mask = cv2.medianBlur(crop_mask, ksize=7) # need bigger
             # crop_mask = cv2.erode(crop_mask, np.ones((3, 3)), iterations=2)
             # crop_mask = cv2.dilate(crop_mask, np.ones((3, 3)), iterations=2)
 
@@ -341,6 +341,40 @@ class YOLOv8Seg:
             cv2.rectangle(output_image, (x1, y1), (x1 + text_width, y1 - text_height), color, -1)
             cv2.putText(output_image, caption, (x1, y1), cv2.FONT_HERSHEY_SIMPLEX,
                         text_size, (255, 255, 255), text_thickness, cv2.LINE_AA)
+
+        return output_image
+
+    def draw_detections_test(self, image, boxes, masks, mask_alpha=0.3, mask_colors=None):
+        # Set the font scale and text thickness based on image size
+        image_height, image_width = image.shape[:2]
+        output_image = image.copy()
+
+        # If no mask colors are provided, generate random colors
+        if mask_colors is None:
+            mask_colors = random_colors(len(boxes))
+
+        # Draw masks
+        for i, (box, color) in enumerate(zip(boxes, mask_colors)):
+            x1, y1, x2, y2 = box.astype(int)
+
+            # Extract the mask region within the bounding box
+            crop_mask = masks[i][y1:y2, x1:x2, np.newaxis]
+            crop_output_image = output_image[y1:y2, x1:x2]
+
+            # Blend the mask color with the image
+            crop_output_image = crop_output_image * (1 - crop_mask) + crop_mask * color
+            output_image[y1:y2, x1:x2] = crop_output_image
+
+        # Apply the mask with the specified alpha value
+        output_image = cv2.addWeighted(output_image, mask_alpha, image, 1 - mask_alpha, 0)
+
+        # Draw bounding boxes and labels
+        for box, color in zip(boxes, mask_colors):
+            color = color.tolist()
+            x1, y1, x2, y2 = box.astype(int)
+
+            # Draw the bounding box
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), color, 2)
 
         return output_image
 

@@ -147,7 +147,7 @@ class ObjectRemover():
 
         return result_image
 
-    def match(self, src_image, dst_image):
+    def match(self, src_image, dst_image, src_box, max_distance=50):
         # Predict instances in the destination image
         self.model_yolov8.predict(dst_image)
 
@@ -158,16 +158,21 @@ class ObjectRemover():
         # Detect keypoints and compute descriptors for the source image
         keypointsA, descriptorsA = orb.detectAndCompute(src_image, None)
 
-        best_similarity = 0.35
+        best_similarity = 0.20
         max_possible_matches = len(descriptorsA)
         
         matched_index = None
         matched_image = None
 
+        # Calculate the center point of the source box image
+        src_center_x = (src_box[0] + src_box[2]) / 2
+        src_center_y = (src_box[1] + src_box[3]) / 2
+
         # Iterate through each instance detected in the destination image
         for index in range(len(self.model_yolov8.result_classes)):
             # Extract the instance image from the destination image
             compared_image = self.model_yolov8.extract_instance(index)
+            matched_box = self.model_yolov8.result_boxes[index]
 
             # Detect keypoints and compute descriptors for the instance image
             keypointsB, descriptorsB = orb.detectAndCompute(compared_image, None)
@@ -181,9 +186,14 @@ class ObjectRemover():
             num_matches = len(matches)
 
             # Update the best similarity and matched index/image if the current similarity is higher
+            # Also, we need to ensure that the distance between two matched instances are not too far
             similarity = num_matches / max_possible_matches
 
-            if similarity > best_similarity:
+            matched_center_x = (matched_box[0] + matched_box[2]) / 2
+            matched_center_y = (matched_box[1] + matched_box[3]) / 2
+            distance = math.sqrt((matched_center_x - src_center_x) ** 2 + (matched_center_y - src_center_y) ** 2)
+
+            if similarity > best_similarity and distance <= max_distance:
                 best_similarity = similarity
 
                 matched_index = index
@@ -262,11 +272,19 @@ class ObjectRemover():
                 break
 
         # Track the target instance on each frame
-        progress = tqdm(record_frames, desc=f"Tracking", total=len(record_frames))
+        progress = tqdm(enumerate(record_frames), desc=f"Tracking", total=len(record_frames))
 
-        for frame in progress:
+        # Add the box for matching frames
+        src_box = self.model_yolov8.result_boxes[self._selected_index].copy()
+
+        # Store the continuous masks, and use it to create a big masks
+        mask_stack = []
+        position_stack = np.empty((0, 5))
+        delete_threshold = 10  # 3 for zebra scene, 10 for bird scene
+
+        for id, frame in progress:
             # Match the target instance with the current frame
-            matched_index, matched_image = self.match(target_instance_image, frame)
+            matched_index, matched_image = self.match(target_instance_image, frame, src_box)
 
             # Combining the instance moving mask
             if matched_index is not None:
@@ -275,16 +293,39 @@ class ObjectRemover():
 
                 # Record the bounding box and mask
                 x1, y1 = list(map(math.floor, matched_box[:2]))
-                x2, y2 = list(map(math.floor, matched_box[2:]))
+                x2, y2 = list(map(math.ceil, matched_box[2:]))
 
-                record_boxes.append([x1, y1, x2, y2])
-                record_masks.append(matched_mask[y1:y2, x1:x2])
+                position_stack = np.vstack((position_stack, np.array([id, x1, y1, x2, y2])))
+                mask_stack.append(matched_mask)
 
                 # Combine the new mask with the moving mask
                 moving_mask = cv2.bitwise_or(moving_mask, matched_mask)
 
                 # Update the target instance for the next frame
                 target_instance_image = matched_image.copy()
+                
+                # Update the source box for the next frame
+                src_box = matched_box.copy()
+
+            # Get the maximum box sixe
+            if len(position_stack):
+                final_x1 = np.min(position_stack[:, 1]).astype(np.int16)
+                final_y1 = np.min(position_stack[:, 2]).astype(np.int16)
+                final_x2 = np.max(position_stack[:, 3]).astype(np.int16)
+                final_y2 = np.max(position_stack[:, 4]).astype(np.int16)
+
+                final_mask = np.zeros_like(matched_mask)
+
+                for mask in mask_stack:
+                    final_mask = cv2.bitwise_or(final_mask, mask)
+
+                record_boxes.append([final_x1, final_y1, final_x2, final_y2])
+                record_masks.append(final_mask[final_y1:final_y2, final_x1:final_x2])
+
+                # Remove the box and mask that too old
+                if id - position_stack[0][0] > delete_threshold:
+                    position_stack = position_stack[1:]
+                    mask_stack = mask_stack[1:]
             else:
                 record_boxes.append(None)
                 record_masks.append(None)
@@ -343,6 +384,9 @@ class ObjectRemover():
                                                                      self.capture.total_frames,
                                                                      target_instance_image)
 
+        # Initialize the 5x5 kernel for dilation
+        dilate_kernel = np.ones((11, 11), dtype=np.uint8)
+
         # Process each recorded bounding box and mask
         results = []
 
@@ -356,7 +400,7 @@ class ObjectRemover():
                 continue
 
             # Initialize a background image and a filled mask
-            background_image = np.zeros((self.capture.height, self.capture.width, 3))
+            background_image = frame.copy()
             filled_mask = moving_mask.copy()
 
             if shadow_mask is not None:
@@ -375,13 +419,28 @@ class ObjectRemover():
                     reached_start = True
 
                 if not np.any(filled_mask):
-                    break
+                    break    
+                
+                if not reached_start and boxes[prev_index] is not None:
+                    # Create a mask for the previous frame
+                    x1, y1, x2, y2 = boxes[prev_index]
+                    target_instance_mask = np.zeros((self.capture.height, self.capture.width))
+                    target_instance_mask[y1:y2, x1:x2] = masks[prev_index]
+
+                    # Copy the background pixels from the previous frame where the mask excludes the target instance
+                    exclude_mask = cv2.bitwise_xor(filled_mask, target_instance_mask)
+                    remain_mask = cv2.bitwise_and(filled_mask, exclude_mask).astype(np.bool_)
+                    filled_mask = cv2.bitwise_and(filled_mask, target_instance_mask)
+                    background_image[remain_mask] = frames[prev_index][remain_mask]
 
                 if not reached_start and boxes[prev_index] is not None:
                     # Create a mask for the previous frame
                     x1, y1, x2, y2 = boxes[prev_index]
                     target_instance_mask = np.zeros((self.capture.height, self.capture.width))
                     target_instance_mask[y1:y2, x1:x2] = masks[prev_index]
+                    
+                    # Dilate the mask 
+                    target_instance_mask = cv2.dilate(target_instance_mask, dilate_kernel, iterations=1)
 
                     # Copy the background pixels from the previous frame where the mask excludes the target instance
                     exclude_mask = cv2.bitwise_xor(filled_mask, target_instance_mask)
@@ -403,6 +462,9 @@ class ObjectRemover():
                     target_instance_mask = np.zeros((self.capture.height, self.capture.width))
                     target_instance_mask[y1:y2, x1:x2] = masks[next_index]
                     
+                    # Dilate the mask
+                    target_instance_mask = cv2.dilate(target_instance_mask, dilate_kernel, iterations=1)
+
                     # Copy the background pixels from the next frame where the mask excludes the target instance
                     exclude_mask = cv2.bitwise_xor(filled_mask, target_instance_mask)
                     remain_mask = cv2.bitwise_and(filled_mask, exclude_mask).astype(np.bool_)
@@ -415,6 +477,9 @@ class ObjectRemover():
             x1, y1, x2, y2 = boxes[current_index]
             target_instance_mask = np.zeros((self.capture.height, self.capture.width))
             target_instance_mask[y1:y2, x1:x2] = masks[current_index]
+
+            # Dilate the mask
+            target_instance_mask = cv2.dilate(target_instance_mask, dilate_kernel, iterations=1)
             target_instance_mask = target_instance_mask.astype(np.bool_)
 
             # Replace the target instance in the current frame with the background
@@ -458,11 +523,14 @@ class ObjectRemover():
 
 def main():
     # filepath = './resources/IMG_1722.jpg'
-    filepath = './resources/4K African Animals - Serengeti National Park.mp4'
+    filepath = './resources/640x360_Zebra.mp4'
+    # filepath = './resources/640x360_Birds.mp4.mp4'
+    # filepath = './resources/640x360_Eagle.mp4'
+    # filepath = './resources/640x360_Giraffe.mp4'
 
     remover = ObjectRemover()
     remover.load(filepath)
-    remover.run()
+    remover.run(learning_base=False)
 
 
 if __name__ == '__main__':
