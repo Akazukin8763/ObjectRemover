@@ -2,7 +2,6 @@ import threading
 
 import cv2
 
-
 image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff']
 
 
@@ -25,9 +24,6 @@ class MediaCapture:
             self._height = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
             self._fps = self.capture.get(cv2.CAP_PROP_FPS)
             self._total_frames = int(self.capture.get(cv2.CAP_PROP_FRAME_COUNT))
-
-            self.capture.set(cv2.CAP_PROP_POS_FRAMES, 200)
-            self._total_frames = 300
 
             self.lock = threading.Lock()
             self.event = threading.Event()

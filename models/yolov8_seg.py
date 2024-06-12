@@ -202,7 +202,7 @@ class YOLOv8Seg:
             crop_mask = cv2.resize(scale_crop_mask, (x2 - x1, y2 - y1), interpolation=cv2.INTER_CUBIC)
 
             # crop_mask = cv2.blur(crop_mask, blur_size)
-            crop_mask = cv2.medianBlur(crop_mask, ksize=7) # need bigger
+            crop_mask = cv2.medianBlur(crop_mask, ksize=7)
             # crop_mask = cv2.erode(crop_mask, np.ones((3, 3)), iterations=2)
             # crop_mask = cv2.dilate(crop_mask, np.ones((3, 3)), iterations=2)
 
